@@ -51,11 +51,13 @@
 
         // 1. 动态加载插件列表
         const pluginFiles = [
-            'plugins/shear_warp.js',
-            'plugins/curve_ripple.js',
-            'plugins/water_ripple.js',
-            'plugins/gradient_shatter.js',
-            'plugins/chroma_shuffling.js'
+            'plugins/shear_warp.js',          // 阶段1：宏观宏观形变，推歪 AI 文本行检测框
+            'plugins/curve_ripple.js',        // 阶段2：多频复合曲线，对笔画进行骨架宏观撕裂
+            'plugins/water_ripple.js',        // 阶段3：多中心环形干涉，从空间方向上打散字符拓扑
+            'plugins/gradient_shatter.js',    // 阶段4：1像素边缘梯度粉碎，斩断微观笔画连续性
+            'plugins/chroma_shuffling.js',    // 阶段5：色彩高频通道色差分离，污染大模型高层向量特征
+            'plugins/text_poison.js',         // 阶段6：实体文本与特殊符号语义污染
+            'plugins/physical_line.js'        // 阶段7：彩色物理线与几何干扰层
         ];
 
         // 2. 动态注入插件内核
