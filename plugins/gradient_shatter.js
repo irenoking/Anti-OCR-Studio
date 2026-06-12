@@ -15,12 +15,18 @@ window.AntiOcrPlugins.push({
     },
     
     process: function(ctx, imageData, currentParams) {
-        const w = imageData.width;
-        const h = imageData.height;
-        
         // 提取调参滑块值
         const density = currentParams.shatterDensity.value;
         const threshold = currentParams.edgeThreshold.value;
+
+        // ✨ 【核心修复拦截】：如果粉碎概率为 0，绝对不计算，直接原图透传
+        if (density === 0) {
+            return imageData;
+        }
+
+        const w = imageData.width;
+        const h = imageData.height;
+        
         
         // 创建用于流管道输出的全新像素缓冲区
         const outputData = ctx.createImageData(w, h);
@@ -67,6 +73,7 @@ window.AntiOcrPlugins.push({
                             dst[idx]     = src[srcTargetIdx];     // Red
                             dst[idx + 1] = src[srcTargetIdx + 1]; // Green
                             dst[idx + 2] = src[srcTargetIdx + 2]; // Blue
+                            dst[idx + 3] = src[srcTargetIdx + 3]; // Alpha
                             // Alpha通道（dst[idx+3]）由深拷贝自动维护，无需操纵
                         }
                     }
