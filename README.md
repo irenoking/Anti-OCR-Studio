@@ -56,7 +56,7 @@ anti-ocr-studio/
 ### 1. 克隆仓库
 
 ```bash
-git clone [https://github.com/irenoking/anti-ocr-studio.git](https://github.com/irenoking/anti-ocr-studio.git)
+git clone https://github.com/irenoking/anti-ocr-studio.git
 cd anti-ocr-studio
 
 ```
