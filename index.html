@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>Anti-OCR 开放式算法流叠加工作台</title>
+    <title>Anti-OCR 开放式算法流叠加工作台 v1.2</title>
     <style>
         :root { --bg: #1e1e24; --panel: #2a2a35; --accent: #ff2e63; --text: #e0e0e0; }
         body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; gap: 20px; height: 100vh; box-sizing: border-box; }
@@ -16,18 +16,20 @@
         .param-row input { width: 100%; accent-color: var(--accent); }
         .btn { background: var(--accent); color: white; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%; }
         .btn:hover { opacity: 0.9; }
+        .config-hint { font-size: 11px; color: #888; text-align: center; margin-top: -5px; }
     </style>
 </head>
 <body>
 
     <div class="sidebar">
         <h2 style="margin:0; font-size:18px; color:var(--accent);">⚙️ 算法流控制台</h2>
-        <div style="font-size:12px; color:#777;">提示：不同算法按面板顺序从上到下依次叠加</div>
+        <div class="config-hint" id="configHint">⚙️ 状态：已启用参数自动本地记忆</div>
         
         <div id="pipelineContainer"></div>
 
         <button class="btn" id="copyBtn">📋 复制最终魔改图</button>
         <button class="btn" style="background:#4e4e4e;" id="downloadBtn">💾 下载安全图片</button>
+        <button class="btn" style="background:#222; border:1px solid #444;" id="resetConfigBtn">🔄 恢复插件默认参数</button>
         <div id="status" style="font-size:12px; text-align:center; color:var(--accent);"></div>
     </div>
 
@@ -37,35 +39,33 @@
     </div>
 
     <script>
-        // ✅ 优化后的代码：显式声明该画布将频繁进行内存读回
+        // 开启 willReadFrequently 属性加速高频读回，消除 Chromium 性能警告
         const mainCanvas = document.getElementById('mainCanvas');
         const ctx = mainCanvas.getContext('2d', { willReadFrequently: true });
-
         const pipelineContainer = document.getElementById('pipelineContainer');
         const status = document.getElementById('status');
+        const configHint = document.getElementById('configHint');
 
         let originalImage = new Image();
-        let loadedPlugins = []; // 存放加载的插件对象
+        let loadedPlugins = []; 
 
-        // 1. 定义需要动态加载的插件列表
-        // 修改 index.html 中的第 52 行附近的数组定义
+        // 1. 动态加载插件列表
         const pluginFiles = [
-        'plugins/shear_warp.js',          // 阶段1：宏观宏观形变，推歪 AI 文本行检测框
-        'plugins/curve_ripple.js',        // 阶段2：多频复合曲线，对笔画进行骨架宏观撕裂
-        'plugins/water_ripple.js',        // 阶段3：多中心环形干涉，从空间方向上打散字符拓扑
-        'plugins/gradient_shatter.js',    // 阶段4：1像素边缘梯度粉碎，斩断微观笔画连续性
-        'plugins/chroma_shuffling.js',    // 阶段5：色彩高频通道色差分离，污染大模型高层向量特征
-        'plugins/physical_line.js',       // 阶段6：注入彩色粗线条与对比噪点，破坏大模型卷积池化
-        'plugins/text_poison.js'          // 阶段7：最后注入显性随机文本实体，实施终极语言模型语义污染
+            'plugins/shear_warp.js',
+            'plugins/curve_ripple.js',
+            'plugins/water_ripple.js',
+            'plugins/gradient_shatter.js',
+            'plugins/chroma_shuffling.js'
         ];
 
-        // 2. 动态加载插件内核
+        // 2. 动态注入插件内核
         async function loadPlugins() {
+            window.AntiOcrPlugins = []; // 保证容器干净
             for (const file of pluginFiles) {
                 try {
                     await new Promise((resolve, reject) => {
                         const script = document.createElement('script');
-                        script.src = `${file}?t=${Date.now()}`; // 阻止浏览器缓存
+                        script.src = `${file}?t=${Date.now()}`; 
                         script.onload = resolve;
                         script.onerror = reject;
                         document.head.appendChild(script);
@@ -75,14 +75,61 @@
                     console.error(`Failed to load plugin: ${file}`, e);
                 }
             }
-            // 插件加载完后，渲染它们的控制面板
+            
+            // 核心重构步骤：加载完脚本后，先尝试从本地缓存还原参数
+            applySavedConfig();
+            // 渲染控制台 UI
             renderPluginPanels();
         }
 
-        // 3. 渲染插件调参面板
+        // 3. 【新功能】从 localStorage 读取并覆盖参数
+        function applySavedConfig() {
+            const savedData = localStorage.getItem('ANTI_OCR_STUDIO_CONFIG');
+            if (!savedData) return;
+            
+            try {
+                const configMap = JSON.parse(savedData);
+                if (window.AntiOcrPlugins) {
+                    window.AntiOcrPlugins.forEach(plugin => {
+                        // 如果缓存里存了当前插件的调参数据
+                        if (configMap[plugin.name]) {
+                            const savedParams = configMap[plugin.name];
+                            // 遍历恢复每个参数的 value
+                            for (const key in plugin.params) {
+                                if (savedParams[key] !== undefined) {
+                                    plugin.params[key].value = savedParams[key];
+                                }
+                            }
+                        }
+                    });
+                }
+                configHint.innerText = "✨ 状态：已自动加载上次缓存的参数配置";
+                configHint.style.color = "#00adb5";
+            } catch (e) {
+                console.error("读取本地配置缓存失败:", e);
+                configHint.innerText = "❌ 状态：缓存配置文件解析异常";
+            }
+        }
+
+        // 4. 【新功能】自动打包当前全量参数并保存到 localStorage
+        function saveConfigToLocalStorage() {
+            const configMap = {};
+            loadedPlugins.forEach(plugin => {
+                configMap[plugin.name] = {};
+                for (const [key, param] of Object.entries(plugin.params)) {
+                    configMap[plugin.name][key] = param.value;
+                }
+            });
+            localStorage.setItem('ANTI_OCR_STUDIO_CONFIG', JSON.stringify(configMap));
+            configHint.innerText = "💾 状态：检测到滑块变更，配置已自动实时归档";
+            configHint.style.color = "#777";
+        }
+
+        // 5. 渲染插件调参面板
         function renderPluginPanels() {
             pipelineContainer.innerHTML = '';
-            // 遍历全局注册的 AntiOcrPlugins
+            loadedPlugins = []; // 重置
+            
             if (window.AntiOcrPlugins) {
                 window.AntiOcrPlugins.forEach((plugin, index) => {
                     loadedPlugins.push(plugin);
@@ -108,14 +155,19 @@
             }
         }
 
-        // 4. 实时动态更新参数并触发 Pipeline 渲染
+        // 6. 实时参数动态更新与流式保存
         window.updateParam = function(pluginIndex, paramKey, value) {
             loadedPlugins[pluginIndex].params[paramKey].value = parseFloat(value);
             document.getElementById(`val_${pluginIndex}_${paramKey}`).innerText = value;
+            
+            // 1. 自动触发本地缓存记忆归档
+            saveConfigToLocalStorage();
+            
+            // 2. 刷新图像 Pipeline
             if (originalImage.src) executePipeline();
         };
 
-        // 5. 核心流式叠加调度引擎 (Pipeline Execution)
+        // 7. 核心流式叠加调度引擎 (Pipeline Execution)
         function executePipeline() {
             if (!originalImage.src) return;
             
@@ -124,23 +176,24 @@
             mainCanvas.width = w;
             mainCanvas.height = h;
 
-            // 绘制初始图像作为基础图层
             ctx.drawImage(originalImage, 0, 0);
 
-            // 流式迭代：将上一个算法的结果作为输入传给下一个算法
             loadedPlugins.forEach(plugin => {
-                // 获取当前画布的最新的像素状态
                 let currentImageData = ctx.getImageData(0, 0, w, h);
-                
-                // 核心解耦调用：把画布和当前插件的专属参数传进去
                 let processedImageData = plugin.process(ctx, currentImageData, plugin.params);
-                
-                // 将处理完的数据写回画布，供下一个插件使用
                 ctx.putImageData(processedImageData, 0, 0);
             });
         }
 
-        // 6. 拖拽及复制事件绑定
+        // 8. 【新功能】一键清空本地缓存，恢复出厂设置
+        document.getElementById('resetConfigBtn').addEventListener('click', () => {
+            if (confirm("确定要放弃当前的对抗调参配置，恢复出厂默认值吗？")) {
+                localStorage.removeItem('ANTI_OCR_STUDIO_CONFIG');
+                location.reload(); // 刷新页面重新拉取原生默认值
+            }
+        });
+
+        // 9. 拖拽及复制事件绑定
         const dropZone = document.getElementById('dropZone');
         dropZone.addEventListener('dragover', (e) => e.preventDefault());
         dropZone.addEventListener('drop', (e) => {
@@ -162,12 +215,12 @@
             if (!originalImage.src) return;
             mainCanvas.toBlob(async (blob) => {
                 await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-                status.innerText = "✅ 已成功复制多重叠加魔改图！";
+                status.innerText = "✅ 最终防御组合图已成功复制！";
                 setTimeout(() => status.innerText = "", 2500);
             });
         });
 
-        // 页面初始化加载插件
+        // 启动主引擎
         loadPlugins();
     </script>
 </body>
