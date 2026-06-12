@@ -35,6 +35,11 @@ window.AntiOcrPlugins.push({
         const sCount = currentParams.shapeCount.value;
         const pDensity = currentParams.pointDensity.value;
         
+        // ✨ 【新增绝对防御边界拦截】：如果全部调成了 0，原封不动原汁原味透传，彻底解决变色和卡顿
+        if (lCount === 0 && sCount === 0 && pDensity === 0) {
+            return imageData; 
+        }
+        
         // 辅助随机数生成器
         const rand = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
         

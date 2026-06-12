@@ -19,6 +19,11 @@ window.AntiOcrPlugins.push({
         
         const shift = currentParams.chromaShift.value;
         const band = currentParams.shredBand.value;
+
+        // ✨ 【核心修复拦截】：如果色差偏置为 0，立刻原样透传，不碰任何通道
+        if (shift === 0) {
+            return imageData;
+        }
         
         const outputData = ctx.createImageData(w, h);
         const src = imageData.data;
