@@ -2,14 +2,16 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>Anti-OCR 开放式算法流叠加工作台 v1.2</title>
+    <title>Anti-OCR 开放式算法流叠加工作台 v1.5</title>
     <style>
         :root { --bg: #1e1e24; --panel: #2a2a35; --accent: #ff2e63; --text: #e0e0e0; }
         body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; gap: 20px; height: 100vh; box-sizing: border-box; }
         .sidebar { width: 360px; background: var(--panel); padding: 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); overflow-y: auto; }
-        .workspace { flex: 1; background: #111; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; border: 2px dashed #333; }
-        .drop-zone { position: absolute; top:0; left:0; width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:#666; pointer-events:none; font-size: 18px; }
-        canvas { max-width: 95%; max-height: 85vh; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 10; }
+        .workspace { flex: 1; background: #111; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; border: 2px dashed #444; cursor: pointer; transition: background 0.2s, border-color 0.2s; }
+        .workspace:hover { background: #15151a; border-color: var(--accent); }
+        .drop-zone { position: absolute; top:0; left:0; width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#666; pointer-events:none; font-size: 16px; gap: 10px; text-align: center; }
+        .drop-zone span { font-size: 13px; color: #444; }
+        canvas { max-width: 95%; max-height: 85vh; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 10; cursor: default; }
         .plugin-card { background: #343446; padding: 12px; border-radius: 8px; border-left: 4px solid var(--accent); margin-bottom: 10px; }
         .plugin-title { font-weight: bold; font-size: 14px; margin-bottom: 8px; display: flex; justify-content: space-between; }
         .param-row { margin-bottom: 6px; font-size: 12px; color: #aaa; }
@@ -34,17 +36,24 @@
     </div>
 
     <div class="workspace" id="dropZone">
-        <div class="drop-zone" id="dropHint">拖拽图片至此处开始混淆</div>
+        <div class="drop-zone" id="dropHint">
+            <div>💡 拖拽图片至此 / 鼠标点击选择文件 / 在页面中 Ctrl+V 粘贴截图</div>
+            <span>( 纯前端矩阵运算，数据绝不上传服务器 )</span>
+        </div>
+        <input type="file" id="hiddenFileInput" accept="image/*" style="display: none;">
         <canvas id="mainCanvas"></canvas>
     </div>
 
     <script>
-        // 开启 willReadFrequently 属性加速高频读回，消除 Chromium 性能警告
         const mainCanvas = document.getElementById('mainCanvas');
         const ctx = mainCanvas.getContext('2d', { willReadFrequently: true });
         const pipelineContainer = document.getElementById('pipelineContainer');
         const status = document.getElementById('status');
         const configHint = document.getElementById('configHint');
+        
+        const dropZone = document.getElementById('dropZone');
+        const dropHint = document.getElementById('dropHint');
+        const hiddenFileInput = document.getElementById('hiddenFileInput');
 
         let originalImage = new Image();
         let loadedPlugins = []; 
@@ -60,9 +69,9 @@
             'plugins/physical_line.js'        // 阶段7：彩色物理线与几何干扰层
         ];
 
-        // 2. 动态注入插件内核
+        // 1. 动态注入插件内核
         async function loadPlugins() {
-            window.AntiOcrPlugins = []; // 保证容器干净
+            window.AntiOcrPlugins = [];
             for (const file of pluginFiles) {
                 try {
                     await new Promise((resolve, reject) => {
@@ -72,31 +81,24 @@
                         script.onerror = reject;
                         document.head.appendChild(script);
                     });
-                    console.log(`Plugin loaded: ${file}`);
                 } catch (e) {
                     console.error(`Failed to load plugin: ${file}`, e);
                 }
             }
-            
-            // 核心重构步骤：加载完脚本后，先尝试从本地缓存还原参数
             applySavedConfig();
-            // 渲染控制台 UI
             renderPluginPanels();
         }
 
-        // 3. 【新功能】从 localStorage 读取并覆盖参数
+        // 2. 从 localStorage 恢复参数
         function applySavedConfig() {
             const savedData = localStorage.getItem('ANTI_OCR_STUDIO_CONFIG');
             if (!savedData) return;
-            
             try {
                 const configMap = JSON.parse(savedData);
                 if (window.AntiOcrPlugins) {
                     window.AntiOcrPlugins.forEach(plugin => {
-                        // 如果缓存里存了当前插件的调参数据
                         if (configMap[plugin.name]) {
                             const savedParams = configMap[plugin.name];
-                            // 遍历恢复每个参数的 value
                             for (const key in plugin.params) {
                                 if (savedParams[key] !== undefined) {
                                     plugin.params[key].value = savedParams[key];
@@ -108,12 +110,11 @@
                 configHint.innerText = "✨ 状态：已自动加载上次缓存的参数配置";
                 configHint.style.color = "#00adb5";
             } catch (e) {
-                console.error("读取本地配置缓存失败:", e);
                 configHint.innerText = "❌ 状态：缓存配置文件解析异常";
             }
         }
 
-        // 4. 【新功能】自动打包当前全量参数并保存到 localStorage
+        // 3. 自动打包全量参数并保存
         function saveConfigToLocalStorage() {
             const configMap = {};
             loadedPlugins.forEach(plugin => {
@@ -127,18 +128,15 @@
             configHint.style.color = "#777";
         }
 
-        // 5. 渲染插件调参面板
+        // 4. 动态生成 UI
         function renderPluginPanels() {
             pipelineContainer.innerHTML = '';
-            loadedPlugins = []; // 重置
-            
+            loadedPlugins = [];
             if (window.AntiOcrPlugins) {
                 window.AntiOcrPlugins.forEach((plugin, index) => {
                     loadedPlugins.push(plugin);
-                    
                     const card = document.createElement('div');
                     card.className = 'plugin-card';
-                    
                     let paramsHtml = '';
                     for (const [key, param] of Object.entries(plugin.params)) {
                         paramsHtml += `
@@ -150,36 +148,27 @@
                                        oninput="updateParam(${index}, '${key}', this.value)">
                             </div>`;
                     }
-                    
                     card.innerHTML = `<div class="plugin-title"><span>${plugin.name}</span></div>${paramsHtml}`;
                     pipelineContainer.appendChild(card);
                 });
             }
         }
 
-        // 6. 实时参数动态更新与流式保存
         window.updateParam = function(pluginIndex, paramKey, value) {
             loadedPlugins[pluginIndex].params[paramKey].value = parseFloat(value);
             document.getElementById(`val_${pluginIndex}_${paramKey}`).innerText = value;
-            
-            // 1. 自动触发本地缓存记忆归档
             saveConfigToLocalStorage();
-            
-            // 2. 刷新图像 Pipeline
             if (originalImage.src) executePipeline();
         };
 
-        // 7. 核心流式叠加调度引擎 (Pipeline Execution)
+        // 5. 核心管道渲染逻辑
         function executePipeline() {
             if (!originalImage.src) return;
-            
             const w = originalImage.width;
             const h = originalImage.height;
             mainCanvas.width = w;
             mainCanvas.height = h;
-
             ctx.drawImage(originalImage, 0, 0);
-
             loadedPlugins.forEach(plugin => {
                 let currentImageData = ctx.getImageData(0, 0, w, h);
                 let processedImageData = plugin.process(ctx, currentImageData, plugin.params);
@@ -187,42 +176,99 @@
             });
         }
 
-        // 8. 【新功能】一键清空本地缓存，恢复出厂设置
-        document.getElementById('resetConfigBtn').addEventListener('click', () => {
-            if (confirm("确定要放弃当前的对抗调参配置，恢复出厂默认值吗？")) {
-                localStorage.removeItem('ANTI_OCR_STUDIO_CONFIG');
-                location.reload(); // 刷新页面重新拉取原生默认值
-            }
-        });
-
-        // 9. 拖拽及复制事件绑定
-        const dropZone = document.getElementById('dropZone');
-        dropZone.addEventListener('dragover', (e) => e.preventDefault());
-        dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            const file = e.dataTransfer.files[0];
+        // 6. 通用图像流数据加载器
+        function loadImageFromFile(file) {
             if (file && file.type.startsWith('image/')) {
                 const reader = new FileReader();
                 reader.onload = (event) => { originalImage.src = event.target.result; };
                 reader.readAsDataURL(file);
             }
+        }
+
+        // ==========================================
+        // 🛠️ 【核心扩展】全渠道输入重构事件挂载
+        // ==========================================
+
+        // A. 渠道一：点击工作区打开本地文件
+        dropZone.addEventListener('click', (e) => {
+            // 安全阻断：如果点击的是 Canvas 预览区，不触发文件选择（方便用户在 Canvas 上右键保存）
+            if (e.target === mainCanvas) return;
+            hiddenFileInput.click();
+        });
+        hiddenFileInput.addEventListener('change', () => {
+            if (hiddenFileInput.files.length > 0) {
+                loadImageFromFile(hiddenFileInput.files[0]);
+            }
+        });
+
+        // B. 渠道二：网页内全局监听 Ctrl + V 粘贴图片数据
+        document.addEventListener('paste', (e) => {
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image') !== -1) {
+                    const file = items[i].getAsFile();
+                    console.log("成功截获剪贴板粘贴图片...");
+                    loadImageFromFile(file);
+                    break; // 优先处理第一张图
+                }
+            }
+        });
+
+        // C. 渠道三：经典的拖拽释放映射
+        // ✅ 修复后的代码
+        // ✅ 修复后的代码
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#ff2e63'; // 直接用颜色字符串
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.style.borderColor = '#444';
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#444';
+            if (e.dataTransfer.files.length > 0) {
+                loadImageFromFile(e.dataTransfer.files[0]);
+            }
         });
 
         originalImage.onload = function() {
-            document.getElementById('dropHint').style.display = 'none';
+            dropHint.style.display = 'none';
             executePipeline();
         };
 
+        // 恢复出厂设置
+        document.getElementById('resetConfigBtn').addEventListener('click', () => {
+            if (confirm("确定要放弃当前的对抗调参配置，恢复出厂默认值吗？")) {
+                localStorage.removeItem('ANTI_OCR_STUDIO_CONFIG');
+                location.reload();
+            }
+        });
+
+        // 一键复制回剪贴板
         document.getElementById('copyBtn').addEventListener('click', () => {
             if (!originalImage.src) return;
             mainCanvas.toBlob(async (blob) => {
-                await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-                status.innerText = "✅ 最终防御组合图已成功复制！";
-                setTimeout(() => status.innerText = "", 2500);
+                try {
+                    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+                    status.innerText = "✅ 最终防御组合图已成功复制！";
+                    setTimeout(() => status.innerText = "", 2500);
+                } catch {
+                    status.innerText = "❌ 复制失败，请使用下方按钮下载";
+                }
             });
         });
 
-        // 启动主引擎
+        // 下载安全图片
+        document.getElementById('downloadBtn').addEventListener('click', () => {
+            if (!originalImage.src) return;
+            const link = document.createElement('a');
+            link.download = `anti_ocr_studio_${Date.now()}.png`;
+            link.href = mainCanvas.toDataURL();
+            link.click();
+        });
+
         loadPlugins();
     </script>
 </body>
