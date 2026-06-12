@@ -124,6 +124,3 @@ window.AntiOcrPlugins.push({
 ```
 
 
-3. **丰富 Readme**：如果在 GitHub 仓库根目录下放一张你的工作台运行时的系统调参截图（包含左边丰富的滑块和右边清爽的文字效果），并在文档里加上 `![Preview](./preview.jpg)`，会更容易吸引别人给你点 **Star**！
-
-```
