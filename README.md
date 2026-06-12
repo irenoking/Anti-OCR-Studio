@@ -121,7 +121,8 @@ window.AntiOcrPlugins.push({
 
 本项目基于 **MIT License** 协议开源，详情请参阅 [LICENSE](https://www.google.com/search?q=LICENSE) 文件。
 
+## 效果示例
 
-(copycat.png)
+![木心之文本再生](copycat.png "木心之文本再生")
 
 
